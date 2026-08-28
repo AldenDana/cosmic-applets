@@ -7,6 +7,7 @@ use cctk::{
 };
 use cosmic::{
     Element, Task, app,
+    applet::PanelType,
     iced::{Subscription, event, mouse::{self, ScrollDelta}, Event::Mouse},
     scroll::DiscreteScrollState,
     widget::icon,
@@ -22,11 +23,11 @@ use std::time::Duration;
 
 const SCROLL_RATE_LIMIT: Duration = Duration::from_millis(200);
 
-// Dock icon: two workspaces trading places, in the full-colour style of the
-// other dock icons rather than the monochrome status-panel style. Embedded so
-// the applet does not depend on an icon theme shipping it.
-const WORKSPACE_SWITCHER_ICON: &[u8] =
-    include_bytes!("../../data/icons/workspace-switcher.svg");
+// Same mark in two dresses, because the two bars have different conventions:
+// the status panel is monochrome symbolic, the dock is full colour. Embedded
+// so the applet does not depend on an icon theme shipping them.
+const ICON_SYMBOLIC: &[u8] = include_bytes!("../../data/icons/workspace-switcher-symbolic.svg");
+const ICON_COLOUR: &[u8] = include_bytes!("../../data/icons/workspace-switcher.svg");
 
 pub fn run() -> cosmic::iced::Result {
     cosmic::applet::run::<IcedWorkspacesApplet>(())
@@ -142,17 +143,25 @@ impl cosmic::Application for IcedWorkspacesApplet {
             return cosmic::iced::widget::row![].padding(8).into();
         }
 
-        // `false` = full-colour app icon metrics, not the smaller symbolic
-        // ones. This applet sits in the dock next to real app icons, so it
-        // must be sized like them.
-        let suggested_size = self.core.applet.suggested_size(false);
-        let applet_padding = self.core.applet.suggested_padding(false);
+        // In the dock this sits beside real app icons: full colour, app-icon
+        // metrics. In the status panel it must be a monochrome symbolic glyph
+        // at the smaller symbolic metrics. `suggested_size`/`suggested_padding`
+        // take `is_symbolic`, so the same flag drives both.
+        let in_dock = matches!(self.core.applet.panel_type, PanelType::Dock);
+        let symbolic = !in_dock;
 
-        let btn = cosmic::widget::button::custom(
-            // Not `.symbolic(true)`: that recolours the icon to a single
-            // theme colour, which would throw away the artwork.
-            icon::icon(icon::from_svg_bytes(WORKSPACE_SWITCHER_ICON)).size(suggested_size.0),
-        )
+        let suggested_size = self.core.applet.suggested_size(symbolic);
+        let applet_padding = self.core.applet.suggested_padding(symbolic);
+
+        // `.symbolic(true)` recolours the SVG to a single theme colour, which
+        // is wanted in the panel and would destroy the artwork in the dock.
+        let handle = if symbolic {
+            icon::from_svg_bytes(ICON_SYMBOLIC).symbolic(true)
+        } else {
+            icon::from_svg_bytes(ICON_COLOUR)
+        };
+
+        let btn = cosmic::widget::button::custom(icon::icon(handle).size(suggested_size.0))
         .on_press_down(Message::TogglePopup)
         .class(cosmic::theme::Button::AppletIcon)
         .padding([applet_padding.1, applet_padding.0]);
