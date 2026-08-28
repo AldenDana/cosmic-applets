@@ -2,28 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use cctk::{
-    sctk::reexports::{
-        calloop::channel::SyncSender,
-        protocols::ext::workspace::v1::client::ext_workspace_handle_v1::{
-            self, ExtWorkspaceHandleV1,
-        },
-    },
+    sctk::reexports::{calloop::channel::SyncSender, protocols::ext::workspace::v1::client::ext_workspace_handle_v1},
     workspace::Workspace,
 };
 use cosmic::{
-    Element, Task, Theme, app,
-    applet::cosmic_panel_config::PanelAnchor,
-    iced::core::{Background, Border},
-    iced::{
-        Alignment,
-        Event::Mouse,
-        Length, Limits, Subscription, event,
-        mouse::{self, ScrollDelta},
-        widget::{button, column, row},
-    },
+    Element, Task, app,
+    iced::{Subscription, event, mouse::{self, ScrollDelta}, Event::Mouse},
     scroll::DiscreteScrollState,
-    surface,
-    widget::{Id, autosize, container, space},
+    widget::icon,
 };
 
 use crate::{
@@ -32,64 +18,55 @@ use crate::{
     wayland_subscription::{WorkspacesUpdate, workspaces},
 };
 
-use std::{process::Command as ShellCommand, sync::LazyLock, time::Duration};
-
-static AUTOSIZE_MAIN_ID: LazyLock<Id> = LazyLock::new(|| Id::new("autosize-main"));
+use std::time::Duration;
 
 const SCROLL_RATE_LIMIT: Duration = Duration::from_millis(200);
+
+// Panel icon: a workspace grid with the active one filled. Embedded rather
+// than looked up by name so the applet does not depend on an icon theme
+// shipping it.
+const WORKSPACE_SWITCHER_ICON: &[u8] =
+    include_bytes!("../../data/icons/workspace-switcher-symbolic.svg");
 
 pub fn run() -> cosmic::iced::Result {
     cosmic::applet::run::<IcedWorkspacesApplet>(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Layout {
-    Row,
-    Column,
+// Client proxy for the `cosmic-workspaces` daemon's own D-Bus interface,
+// which already owns a real floating popup (frosted, live-thumbnail grid,
+// separate from its full-screen overview). This applet is just a button
+// that toggles it — no capture/rendering logic lives here.
+#[zbus::proxy(
+    interface = "com.system76.CosmicWorkspaces",
+    default_service = "com.system76.CosmicWorkspaces",
+    default_path = "/com/system76/CosmicWorkspaces"
+)]
+trait CosmicWorkspacesDbus {
+    fn toggle_popup(&self) -> zbus::Result<()>;
+}
+
+async fn toggle_workspaces_popup() {
+    let Ok(conn) = zbus::Connection::session().await else {
+        return;
+    };
+    let Ok(proxy) = CosmicWorkspacesDbusProxy::new(&conn).await else {
+        return;
+    };
+    let _ = proxy.toggle_popup().await;
 }
 
 struct IcedWorkspacesApplet {
     core: cosmic::app::Core,
     workspaces: Vec<Workspace>,
     workspace_tx: Option<SyncSender<WorkspaceEvent>>,
-    layout: Layout,
     scroll: DiscreteScrollState,
-}
-
-impl IcedWorkspacesApplet {
-    /// returns the index of the workspace button after which which must be moved to a popup
-    /// if it exists.
-    fn popup_index(&self) -> Option<usize> {
-        let mut index = None;
-        let Some(max_major_axis_len) = self.core.applet.suggested_bounds.as_ref().map(|c| {
-            // if we have a configure for width and height, we're in a overflow popup
-            match self.core.applet.anchor {
-                PanelAnchor::Top | PanelAnchor::Bottom => c.width as u32,
-                PanelAnchor::Left | PanelAnchor::Right => c.height as u32,
-            }
-        }) else {
-            return index;
-        };
-        let button_total_size = self.core.applet.suggested_size(true).0
-            + self.core.applet.suggested_padding(true).1 * 2
-            + 4;
-        let btn_count = max_major_axis_len / button_total_size as u32;
-        if btn_count >= self.workspaces.len() as u32 {
-            index = None;
-        } else {
-            index = Some((btn_count as usize).min(self.workspaces.len()));
-        }
-        index
-    }
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     WorkspaceUpdate(WorkspacesUpdate),
-    WorkspacePressed(ExtWorkspaceHandleV1),
     WheelScrolled(ScrollDelta),
-    WorkspaceOverview,
-    Surface(surface::Action),
+    TogglePopup,
 }
 
 impl cosmic::Application for IcedWorkspacesApplet {
@@ -101,10 +78,6 @@ impl cosmic::Application for IcedWorkspacesApplet {
     fn init(core: cosmic::app::Core, _flags: Self::Flags) -> (Self, app::Task<Self::Message>) {
         (
             Self {
-                layout: match &core.applet.anchor {
-                    PanelAnchor::Left | PanelAnchor::Right => Layout::Column,
-                    PanelAnchor::Top | PanelAnchor::Bottom => Layout::Row,
-                },
                 core,
                 workspaces: Vec::new(),
                 workspace_tx: Option::default(),
@@ -137,11 +110,6 @@ impl cosmic::Application for IcedWorkspacesApplet {
                     // TODO
                 }
             },
-            Message::WorkspacePressed(id) => {
-                if let Some(tx) = self.workspace_tx.as_mut() {
-                    let _ = tx.try_send(WorkspaceEvent::Activate(id));
-                }
-            }
             Message::WheelScrolled(delta) => {
                 let discrete_delta = self.scroll.update(delta);
                 if discrete_delta.y != 0 {
@@ -162,13 +130,8 @@ impl cosmic::Application for IcedWorkspacesApplet {
                     }
                 }
             }
-            Message::WorkspaceOverview => {
-                let _ = ShellCommand::new("cosmic-workspaces").spawn();
-            }
-            Message::Surface(a) => {
-                return cosmic::task::message(cosmic::Action::Cosmic(
-                    cosmic::app::Action::Surface(a),
-                ));
+            Message::TogglePopup => {
+                return Task::perform(toggle_workspaces_popup(), |_| cosmic::Action::None);
             }
         }
         Task::none()
@@ -176,137 +139,21 @@ impl cosmic::Application for IcedWorkspacesApplet {
 
     fn view(&self) -> Element<'_, Message> {
         if self.workspaces.is_empty() {
-            return row![].padding(8).into();
-        }
-        let horizontal = matches!(
-            self.core.applet.anchor,
-            PanelAnchor::Top | PanelAnchor::Bottom
-        );
-        let suggested_total = self.core.applet.suggested_size(true).0
-            + self.core.applet.suggested_padding(true).1 * 2;
-        let suggested_window_size = self.core.applet.suggested_window_size();
-        let popup_index = self.popup_index().unwrap_or(self.workspaces.len());
-
-        let buttons = self.workspaces[..popup_index].iter().map(|w| {
-            let content = self.core.applet.text(&w.name).font(cosmic::font::bold());
-
-            let (width, height) = if self.core.applet.is_horizontal() {
-                (suggested_total as f32, suggested_window_size.1.get() as f32)
-            } else {
-                (suggested_window_size.0.get() as f32, suggested_total as f32)
-            };
-
-            let content = row!(content, space::vertical().height(Length::Fixed(height)))
-                .align_y(Alignment::Center);
-
-            let content = column!(content, space::horizontal().width(Length::Fixed(width)))
-                .align_x(Alignment::Center);
-
-            let btn = button(content)
-                .padding(if horizontal {
-                    [0, self.core.applet.suggested_padding(true).1]
-                } else {
-                    [self.core.applet.suggested_padding(true).1, 0]
-                })
-                .on_press(
-                    if w.state.contains(ext_workspace_handle_v1::State::Active) {
-                        Message::WorkspaceOverview
-                    } else {
-                        Message::WorkspacePressed(w.handle.clone())
-                    },
-                )
-                .padding(0);
-
-            btn.class(
-                if w.state.contains(ext_workspace_handle_v1::State::Active) {
-                    cosmic::theme::iced::Button::Primary
-                } else if w.state.contains(ext_workspace_handle_v1::State::Urgent) {
-                    let appearance = |theme: &Theme| {
-                        let cosmic = theme.cosmic();
-                        button::Style {
-                            background: Some(Background::Color(cosmic.palette.neutral_3.into())),
-                            border: Border {
-                                radius: cosmic.radius_xl().into(),
-                                ..Default::default()
-                            },
-                            border_radius: theme.cosmic().radius_xl().into(),
-                            text_color: theme.cosmic().destructive_button.base.into(),
-                            ..button::Style::default()
-                        }
-                    };
-                    cosmic::theme::iced::Button::Custom(Box::new(
-                        move |theme, status| match status {
-                            button::Status::Active => appearance(theme),
-                            button::Status::Hovered => button::Style {
-                                background: Some(Background::Color(
-                                    theme.current_container().component.hover.into(),
-                                )),
-                                border: Border {
-                                    radius: theme.cosmic().radius_xl().into(),
-                                    ..Default::default()
-                                },
-                                ..appearance(theme)
-                            },
-                            button::Status::Pressed => appearance(theme),
-                            button::Status::Disabled => appearance(theme),
-                        },
-                    ))
-                } else {
-                    let appearance = |theme: &Theme| {
-                        let cosmic = theme.cosmic();
-                        button::Style {
-                            background: None,
-                            border: Border {
-                                radius: cosmic.radius_xl().into(),
-                                ..Default::default()
-                            },
-                            border_radius: cosmic.radius_xl().into(),
-                            text_color: theme.current_container().component.on.into(),
-                            ..button::Style::default()
-                        }
-                    };
-                    cosmic::theme::iced::Button::Custom(Box::new(
-                        move |theme, status| match status {
-                            button::Status::Active => appearance(theme),
-                            button::Status::Hovered => button::Style {
-                                background: Some(Background::Color(
-                                    theme.current_container().component.hover.into(),
-                                )),
-                                border: Border {
-                                    radius: theme.cosmic().radius_xl().into(),
-                                    ..Default::default()
-                                },
-                                ..appearance(theme)
-                            },
-                            button::Status::Pressed | button::Status::Disabled => appearance(theme),
-                        },
-                    ))
-                },
-            )
-            .into()
-        });
-        // TODO if there is a popup_index, create a button with a popup for the remaining workspaces
-        // Should it appear on hover or on click?
-        let layout_section: Element<_> = match self.layout {
-            Layout::Row => row(buttons).spacing(4).into(),
-            Layout::Column => column(buttons).spacing(4).into(),
-        };
-        let mut limits = Limits::NONE.min_width(1.).min_height(1.);
-        if let Some(b) = self.core.applet.suggested_bounds {
-            if b.width as i32 > 0 {
-                limits = limits.max_width(b.width);
-            }
-            if b.height as i32 > 0 {
-                limits = limits.max_height(b.height);
-            }
+            return cosmic::iced::widget::row![].padding(8).into();
         }
 
-        autosize::autosize(
-            container(layout_section).padding(0),
-            AUTOSIZE_MAIN_ID.clone(),
+        let suggested_size = self.core.applet.suggested_size(true);
+        let applet_padding = self.core.applet.suggested_padding(true);
+
+        let btn = cosmic::widget::button::custom(
+            icon::icon(icon::from_svg_bytes(WORKSPACE_SWITCHER_ICON).symbolic(true))
+                .size(suggested_size.0),
         )
-        .limits(limits)
-        .into()
+        .on_press_down(Message::TogglePopup)
+        .class(cosmic::theme::Button::AppletIcon)
+        .padding([applet_padding.1, applet_padding.0]);
+
+        self.core.applet.autosize_window(btn).into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
