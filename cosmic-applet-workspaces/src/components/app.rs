@@ -22,11 +22,11 @@ use std::time::Duration;
 
 const SCROLL_RATE_LIMIT: Duration = Duration::from_millis(200);
 
-// Panel icon: a workspace grid with the active one filled. Embedded rather
-// than looked up by name so the applet does not depend on an icon theme
-// shipping it.
+// Dock icon: two workspaces trading places, in the full-colour style of the
+// other dock icons rather than the monochrome status-panel style. Embedded so
+// the applet does not depend on an icon theme shipping it.
 const WORKSPACE_SWITCHER_ICON: &[u8] =
-    include_bytes!("../../data/icons/workspace-switcher-symbolic.svg");
+    include_bytes!("../../data/icons/workspace-switcher.svg");
 
 pub fn run() -> cosmic::iced::Result {
     cosmic::applet::run::<IcedWorkspacesApplet>(())
@@ -142,12 +142,16 @@ impl cosmic::Application for IcedWorkspacesApplet {
             return cosmic::iced::widget::row![].padding(8).into();
         }
 
-        let suggested_size = self.core.applet.suggested_size(true);
-        let applet_padding = self.core.applet.suggested_padding(true);
+        // `false` = full-colour app icon metrics, not the smaller symbolic
+        // ones. This applet sits in the dock next to real app icons, so it
+        // must be sized like them.
+        let suggested_size = self.core.applet.suggested_size(false);
+        let applet_padding = self.core.applet.suggested_padding(false);
 
         let btn = cosmic::widget::button::custom(
-            icon::icon(icon::from_svg_bytes(WORKSPACE_SWITCHER_ICON).symbolic(true))
-                .size(suggested_size.0),
+            // Not `.symbolic(true)`: that recolours the icon to a single
+            // theme colour, which would throw away the artwork.
+            icon::icon(icon::from_svg_bytes(WORKSPACE_SWITCHER_ICON)).size(suggested_size.0),
         )
         .on_press_down(Message::TogglePopup)
         .class(cosmic::theme::Button::AppletIcon)

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="ws-bg" x1="0" y1="0" x2="0.45" y2="1">
+      <stop offset="0" stop-color="#17B9C9"/>
+      <stop offset="0.6" stop-color="#0B6E8C"/>
+      <stop offset="1" stop-color="#06465F"/>
+    </linearGradient>
+    <linearGradient id="ws-purple" x1="0" y1="0" x2="0.45" y2="1">
+      <stop offset="0" stop-color="#C79BFF"/>
+      <stop offset="1" stop-color="#7B3FE4"/>
+    </linearGradient>
+    <linearGradient id="ws-orange" x1="0" y1="0" x2="0.45" y2="1">
+      <stop offset="0" stop-color="#FFC46B"/>
+      <stop offset="1" stop-color="#F2751F"/>
+    </linearGradient>
+    <clipPath id="ws-clip-purple"><rect x="18" y="18" width="46" height="40" rx="12"/></clipPath>
+    <clipPath id="ws-clip-orange"><rect x="64" y="70" width="46" height="40" rx="12"/></clipPath>
+    <filter id="ws-shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <filter id="ws-arrow-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#003040" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="128" height="128" rx="29" fill="url(#ws-bg)"/>
+  <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="28.25" fill="none" stroke="#FFFFFF" stroke-opacity="0.25" stroke-width="1.5"/>
+
+  <g filter="url(#ws-shadow)">
+    <rect x="18" y="18" width="46" height="40" rx="12" fill="url(#ws-purple)"/>
+    <rect x="18" y="18" width="46" height="3" fill="#FFFFFF" fill-opacity="0.45" clip-path="url(#ws-clip-purple)"/>
+  </g>
+
+  <g filter="url(#ws-shadow)">
+    <rect x="64" y="70" width="46" height="40" rx="12" fill="url(#ws-orange)"/>
+    <rect x="64" y="70" width="46" height="3" fill="#FFFFFF" fill-opacity="0.45" clip-path="url(#ws-clip-orange)"/>
+  </g>
+
+  <g filter="url(#ws-arrow-shadow)">
+    <path d="M76 36h14a14 14 0 0 1 14 14v10" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round"/>
+    <path d="M104 74l-9-16h18z" fill="#FFFFFF"/>
+    <path d="M52 92H38a14 14 0 0 1-14-14V68" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round"/>
+    <path d="M24 54l9 16H15z" fill="#FFFFFF"/>
+  </g>
+</svg>
